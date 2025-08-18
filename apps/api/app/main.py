@@ -2,6 +2,7 @@ from typing import List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from app.core.scoring import cosine_similarity
 
 # start API
 app = FastAPI(title="Music Akinator API", version="0.1.0")
@@ -14,13 +15,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # ---- schemas ----
-
 class AxisVector(BaseModel):
     warm_bright: float = Field(..., ge=-1, le=1)
     lofi_polished: float = Field(..., ge=-1, le=1)
     acoustic_electronic: float = Field(..., ge=-1, le=1)
     intimate_anthemic: float = Field(..., ge=-1, le=1)
-
 
 class RecRequest(BaseModel):
     user_axes: AxisVector
@@ -36,6 +35,10 @@ class Track(BaseModel):
 class RecResponse(BaseModel):
     results: List[Track]
 
+# ---- Helpers ----
+def _vec(ax: AxisVector) -> List[float]:
+    """Convert AxisVector to a list of floats."""
+    return [ax.warm_bright, ax.lofi_polished, ax.acoustic_electronic, ax.intimate_anthemic]
 
 # ---- Routes ----
 
@@ -69,4 +72,9 @@ def recommendations(req: RecRequest) -> RecResponse:
             score=0.55,
         ),
     ]
-    return RecResponse(results=demo[: req.limit])
+    scored = [
+        t.model_copy(update={"score": cosine_similarity(_vec(req.user_axes), _vec(t.axes))})
+        for t in demo
+    ]
+    scored.sort(key=lambda x: x.score, reverse=True)
+    return RecResponse(results=scored[: req.limit])
